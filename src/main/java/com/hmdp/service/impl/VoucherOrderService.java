@@ -8,8 +8,10 @@ import com.hmdp.mapper.VoucherOrderMapper;
 import com.hmdp.service.ISeckillVoucherService;
 import com.hmdp.service.IVoucherOrderService;
 import com.hmdp.utils.RedisIdWorker;
+import com.hmdp.utils.SimpleRedisLock;
 import com.hmdp.utils.UserHolder;
 import org.springframework.aop.framework.AopContext;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -19,6 +21,8 @@ import java.time.LocalDateTime;
 @Service
 public class VoucherOrderService extends ServiceImpl<VoucherOrderMapper, VoucherOrder> implements IVoucherOrderService {
 
+    @Resource
+    private StringRedisTemplate stringRedisTemplate;
     @Resource
     private RedisIdWorker redisIdWorker;
     @Resource
@@ -39,16 +43,36 @@ public class VoucherOrderService extends ServiceImpl<VoucherOrderMapper, Voucher
             return Result.fail("优惠券库存不足!");
         }
 
-        //查询订单看看是否存在
-        Long userId = UserHolder.getUser().getId();
+        // //查询订单看看是否存在
+        // Long userId = UserHolder.getUser().getId();
+        //
+        // // 按用户关键字加锁，而不是整个方法
+        // // 锁必须加载事务外面，否则不能确保线程安全
+        // synchronized (userId.toString().intern()) {//userId一样的持有同一把锁，最好不要放在整个方法上,intern:去字符串常量池找相同字符串
+        //     // 处理Springboot里@Transaction不生效的解决方法，代理对象
+        //     IVoucherOrderService proxy = (IVoucherOrderService) AopContext.currentProxy();//获得代理对象
+        //     return proxy.createVoucherOrder(voucherId);//默认是this,我们要实现事务需要proxy
+        // }//先获取锁，然后再进入方法，确保我的前一个订单会添加上,能先提交事务再释放锁
 
-        // 按用户关键字加锁，而不是整个方法
-        // 锁必须加载事务外面，否则不能确保线程安全
-        synchronized (userId.toString().intern()) {//userId一样的持有同一把锁，最好不要放在整个方法上,intern:去字符串常量池找相同字符串
-            // 处理Springboot里@Transaction不生效的解决方法，代理对象
+        Long userId = UserHolder.getUser().getId();
+        //创建锁对象
+        SimpleRedisLock lock = new SimpleRedisLock("order" + userId,stringRedisTemplate);
+        //获取锁
+        boolean hasLock = lock.tryLock(1200);
+        if(!hasLock){
+            //获取锁失败: return fail 或者 retry 这里业务要求是返回失败
+            return Result.fail("请勿重复下单!");
+        }
+
+        try {
             IVoucherOrderService proxy = (IVoucherOrderService) AopContext.currentProxy();//获得代理对象
             return proxy.createVoucherOrder(voucherId);//默认是this,我们要实现事务需要proxy
-        }//先获取锁，然后再进入方法，确保我的前一个订单会添加上,能先提交事务再释放锁
+        } catch (IllegalStateException e) {
+            throw new RuntimeException(e);
+        } finally {
+            lock.unlock();
+        }
+
     }
 
     @Transactional

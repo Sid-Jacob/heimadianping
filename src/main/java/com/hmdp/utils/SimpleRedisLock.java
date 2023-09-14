@@ -19,9 +19,11 @@ public class SimpleRedisLock implements ILock {
     }
 
     private static final String KEY_PREFIX = "lock:";
+    // 使用UUID标识主机名，防止冲突
     private static final String ID_PREFIX = UUID.randomUUID().toString(true) + "-";
     private static final DefaultRedisScript<Long> UNLOCK_SCRIPT;
     static {
+        //写成静态代码块，类加载就可以完成初始定义，就不用每次释放锁都去加载这个，性能提高咯
         UNLOCK_SCRIPT = new DefaultRedisScript<>();
         UNLOCK_SCRIPT.setLocation(new ClassPathResource("unlock.lua"));
         UNLOCK_SCRIPT.setResultType(Long.class);
@@ -45,16 +47,16 @@ public class SimpleRedisLock implements ILock {
                 Collections.singletonList(KEY_PREFIX + name),
                 ID_PREFIX + Thread.currentThread().getId());
     }
-    /*@Override
-    public void unlock() {
-        // 获取线程标示
-        String threadId = ID_PREFIX + Thread.currentThread().getId();
-        // 获取锁中的标示
-        String id = stringRedisTemplate.opsForValue().get(KEY_PREFIX + name);
-        // 判断标示是否一致
-        if(threadId.equals(id)) {
-            // 释放锁
-            stringRedisTemplate.delete(KEY_PREFIX + name);
-        }
-    }*/
+    // @Override
+    // public void unlock() {
+    //     // 获取线程标示
+    //     String threadId = ID_PREFIX + Thread.currentThread().getId();
+    //     // 获取锁中的标示
+    //     String id = stringRedisTemplate.opsForValue().get(KEY_PREFIX + name);
+    //     // 判断标示是否一致
+    //     if(threadId.equals(id)) {
+    //         // 释放锁
+    //         stringRedisTemplate.delete(KEY_PREFIX + name);
+    //     }
+    // }
 }
